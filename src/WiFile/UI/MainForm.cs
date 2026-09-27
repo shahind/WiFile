@@ -2,7 +2,6 @@ using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
-using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using Microsoft.Win32;
@@ -17,12 +16,17 @@ namespace WiFile.UI
         readonly WiFileNode _node;
         readonly ExplorerHost _explorer;
         readonly ChatPanel _chat;
-        readonly ToolStripButton _back, _up;
-        readonly ToolStripLabel _path;
-        readonly ToolStripStatusLabel _sync, _peers, _folder;
+        readonly Panel _left = new Panel(), _bar = new Panel(), _status = new Panel(), _banner = new Panel();
+        readonly FlatButton _back, _forward, _up, _refresh, _newFolder, _paste, _view, _openExplorer, _more, _fix, _dismiss;
+        readonly Breadcrumb _crumbs = new Breadcrumb();
+        readonly Label _sync = new Label(), _peers = new Label(), _bannerText = new Label();
+        readonly LinkLabel _folder = new LinkLabel();
+        readonly SplitContainer _split;
         readonly NotifyIcon _tray;
+        readonly ContextMenuStrip _viewMenu = ThemedRenderer.Menu(), _moreMenu = ThemedRenderer.Menu(), _trayMenu = ThemedRenderer.Menu();
         readonly ToolStripMenuItem _autoStart;
-        bool _startHidden, _exiting;
+        bool _startHidden, _exiting, _bannerDismissed;
+        SyncStatus _lastStatus;
 
         public MainForm(WiFileNode node, bool startHidden)
         {
@@ -32,111 +36,202 @@ namespace WiFile.UI
             Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
             Font = Theme.Base;
             StartPosition = FormStartPosition.CenterScreen;
-            Size = new Size(1240, 760);
-            MinimumSize = new Size(760, 480);
-            BackColor = Color.White;
+            Size = Theme.S(1240, 780);
+            MinimumSize = Theme.S(820, 500);
 
-            // ---------------- left: shared folder (real Windows Explorer view)
-            var left = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
-            var bar = new ToolStrip
-            {
-                GripStyle = ToolStripGripStyle.Hidden, RenderMode = ToolStripRenderMode.System, BackColor = Color.White,
-                Padding = new Padding(6, 4, 6, 4), AutoSize = false, Height = 40, CanOverflow = false,
-            };
-            bar.Renderer = new FlatRenderer();
-            _back = Glyph("", "Back (Alt+Left)");
-            _up = Glyph("", "Up one level (Alt+Up)");
-            var home = Glyph("", "Shared folder home");
-            var refresh = Glyph("", "Refresh (F5)");
-            _path = new ToolStripLabel { Font = Theme.Bold, Margin = new Padding(8, 0, 0, 0) };
-            var newFolder = new ToolStripButton("New folder") { Margin = new Padding(2, 0, 2, 0) };
-            var openExplorer = new ToolStripButton("Open in Explorer") { Margin = new Padding(2, 0, 2, 0) };
-            var more = new ToolStripDropDownButton("") { Font = Theme.Icons, ShowDropDownArrow = false, ToolTipText = "More" };
-            newFolder.Alignment = openExplorer.Alignment = more.Alignment = ToolStripItemAlignment.Right;
-            bar.Items.AddRange(new ToolStripItem[] { _back, _up, home, refresh, _path, more, openExplorer, newFolder });
+            // ---------------- top bar (left pane)
+            _bar.Dock = DockStyle.Top;
+            _bar.Height = Theme.S(50);
+            _back = new FlatButton("\uE72B", null, "Back (Alt+Left)");
+            _forward = new FlatButton("\uE72A", null, "Forward (Alt+Right)");
+            _up = new FlatButton("\uE74A", null, "Up (Alt+Up)");
+            _refresh = new FlatButton("\uE72C", null, "Refresh (F5)");
+            _newFolder = new FlatButton("\uE8F4", "New folder", "New folder (Ctrl+Shift+N)");
+            _paste = new FlatButton("\uE77F", null, "Paste (Ctrl+V) \u2014 files, or an image/text from the clipboard");
+            _view = new FlatButton("\uE8A9", "View", "Change how files are shown") { ShowChevron = true };
+            _view.AutoFit();
+            _openExplorer = new FlatButton("\uE8A7", null, "Open this folder in File Explorer");
+            _more = new FlatButton("\uE712", null, "More");
+            _bar.Controls.AddRange(new Control[] { _back, _forward, _up, _refresh, _crumbs, _newFolder, _paste, _view, _openExplorer, _more });
+            _bar.Resize += (s, e) => LayoutBar();
+
+            _explorer = new ExplorerHost(_node.Config.SharedDir) { Dock = DockStyle.Fill };
+            _explorer.ViewMode = Enum.TryParse(_node.Settings.ViewMode, out ViewMode vm) ? vm : ViewMode.Details;
+            _explorer.Navigated += (s, e) => UpdateNav();
+            _crumbs.Navigate += p => _explorer.NavigateTo(p);
+            _back.Click += (s, e) => _explorer.GoBack();
+            _forward.Click += (s, e) => _explorer.GoForward();
+            _up.Click += (s, e) => _explorer.GoUp();
+            _refresh.Click += (s, e) => { _explorer.RefreshView(); _node.Sync.RequestScan(); };
+            _newFolder.Click += (s, e) => _explorer.NewFolder();
+            _paste.Click += (s, e) => _explorer.Paste();
+            _view.Click += (s, e) => { BuildViewMenu(); _viewMenu.Show(_view, new Point(0, _view.Height)); };
+            _openExplorer.Click += (s, e) => OpenDir(_explorer.CurrentPath);
+            _more.Click += (s, e) => { ThemedRenderer.Style(_moreMenu); _moreMenu.Show(_more, new Point(_more.Width - _moreMenu.Width, _more.Height)); };
 
             _autoStart = new ToolStripMenuItem("Start WiFile when I sign in") { Checked = IsAutoStart(), CheckOnClick = true };
             _autoStart.Click += (s, e) => SetAutoStart(_autoStart.Checked);
-            more.DropDownItems.Add(_autoStart);
-            more.DropDownItems.Add("Open received chat files", null, (s, e) => OpenDir(_node.Config.ReceiveDir));
-            more.DropDownItems.Add("Open log folder", null, (s, e) => OpenDir(_node.Config.DataDir));
-            more.DropDownItems.Add(new ToolStripSeparator());
-            more.DropDownItems.Add("About WiFile", null, (s, e) => About());
-            more.DropDownItems.Add("Exit WiFile", null, (s, e) => ExitApp());
-            foreach (ToolStripItem i in more.DropDownItems) i.Font = Theme.Base;
+            _moreMenu.Items.Add(_autoStart);
+            _moreMenu.Items.Add("Change my name\u2026", null, (s, e) => _chat.Rename());
+            _moreMenu.Items.Add("Open received chat files", null, (s, e) => OpenDir(_node.Config.ReceiveDir));
+            _moreMenu.Items.Add("Open log folder", null, (s, e) => OpenDir(_node.Config.DataDir));
+            _moreMenu.Items.Add("Allow WiFile in Windows Firewall\u2026", null, (s, e) => FixFirewall());
+            _moreMenu.Items.Add(new ToolStripSeparator());
+            _moreMenu.Items.Add("About WiFile", null, (s, e) => About());
+            _moreMenu.Items.Add("Exit WiFile", null, (s, e) => ExitApp());
 
-            _explorer = new ExplorerHost(_node.Config.SharedDir) { Dock = DockStyle.Fill };
-            _explorer.Navigated += (s, e) => UpdateNav();
-            _back.Click += (s, e) => _explorer.GoBack();
-            _up.Click += (s, e) => _explorer.GoUp();
-            home.Click += (s, e) => _explorer.GoHome();
-            refresh.Click += (s, e) => { _explorer.RefreshView(); _node.Sync.RequestScan(); };
-            newFolder.Click += (s, e) => NewFolder();
-            openExplorer.Click += (s, e) => OpenDir(_explorer.CurrentPath);
-
-            var line = new Panel { Dock = DockStyle.Top, Height = 1, BackColor = Theme.Border };
-            left.Controls.Add(_explorer);
-            left.Controls.Add(line);
-            left.Controls.Add(bar);
+            _left.Dock = DockStyle.Fill;
+            _left.Controls.Add(_explorer);
+            _left.Controls.Add(_bar);
 
             // ---------------- right: chat
             _chat = new ChatPanel(_node) { Dock = DockStyle.Fill };
             _chat.Incoming += OnIncoming;
 
-            var split = new SplitContainer
+            _split = new SplitContainer { Dock = DockStyle.Fill, FixedPanel = FixedPanel.Panel2, SplitterWidth = Theme.S(1) + 1 };
+            _split.Panel1.Controls.Add(_left);
+            _split.Panel2.Controls.Add(_chat);
+
+            // ---------------- firewall banner
+            _banner.Dock = DockStyle.Top;
+            _banner.Height = Theme.S(44);
+            _banner.Visible = false;
+            _bannerText.AutoSize = false;
+            _bannerText.TextAlign = ContentAlignment.MiddleLeft;
+            _bannerText.Text = "\u26A0  Windows Firewall is blocking other PCs from connecting to this one. WiFile works around it, but allowing it is faster and more reliable.";
+            _fix = new FlatButton("\uE83D", "Allow", "Add a Windows Firewall rule for WiFile (asks for administrator permission)") { Accent = true };
+            _fix.Click += (s, e) => FixFirewall();
+            _dismiss = new FlatButton("\uE711", null, "Hide");
+            _dismiss.Click += (s, e) => { _bannerDismissed = true; _banner.Visible = false; };
+            _banner.Controls.AddRange(new Control[] { _bannerText, _fix, _dismiss });
+            _banner.Resize += (s, e) =>
             {
-                Dock = DockStyle.Fill, FixedPanel = FixedPanel.Panel2, SplitterWidth = 5, BackColor = Theme.Border,
+                int m = Theme.S(8);
+                _dismiss.Location = new Point(_banner.Width - m - _dismiss.Width, (_banner.Height - _dismiss.Height) / 2);
+                _fix.Location = new Point(_dismiss.Left - Theme.S(6) - _fix.Width, (_banner.Height - _fix.Height) / 2);
+                _bannerText.SetBounds(Theme.S(14), 0, _fix.Left - Theme.S(24), _banner.Height);
             };
-            split.Panel1.BackColor = Color.White;
-            split.Panel2.BackColor = Color.White;
-            split.Panel1.Controls.Add(left);
-            split.Panel2.Controls.Add(_chat);
 
             // ---------------- status bar
-            var status = new StatusStrip { SizingGrip = true, BackColor = Color.FromArgb(248, 248, 248) };
-            _sync = new ToolStripStatusLabel("Starting…") { Spring = true, TextAlign = ContentAlignment.MiddleLeft };
-            _peers = new ToolStripStatusLabel();
-            _folder = new ToolStripStatusLabel(_node.Config.SharedDir) { IsLink = true, LinkColor = Theme.Accent, ToolTipText = "Your copy of the shared folder — click to open" };
-            _folder.Click += (s, e) => OpenDir(_node.Config.SharedDir);
-            status.Items.AddRange(new ToolStripItem[] { _sync, _peers, new ToolStripStatusLabel("│") { ForeColor = Theme.Border }, _folder });
+            _status.Dock = DockStyle.Bottom;
+            _status.Height = Theme.S(30);
+            _sync.AutoSize = false;
+            _sync.AutoEllipsis = true;
+            _sync.TextAlign = ContentAlignment.MiddleLeft;
+            _peers.AutoSize = true;
+            _folder.AutoSize = true;
+            _folder.Text = _node.Config.SharedDir;
+            _folder.LinkBehavior = LinkBehavior.HoverUnderline;
+            _folder.LinkClicked += (s, e) => OpenDir(_node.Config.SharedDir);
+            new ToolTip().SetToolTip(_folder, "Your copy of the shared folder \u2014 click to open in File Explorer");
+            _status.Controls.AddRange(new Control[] { _sync, _peers, _folder });
+            _status.Resize += (s, e) => LayoutStatus();
+            _status.Paint += (s, e) => { using (var p = new Pen(Theme.Border)) e.Graphics.DrawLine(p, 0, 0, _status.Width, 0); };
 
-            Controls.Add(split);
-            Controls.Add(status);
+            Controls.Add(_split);
+            Controls.Add(_banner);
+            Controls.Add(_status);
 
             // ---------------- tray
-            var trayMenu = new ContextMenuStrip();
-            trayMenu.Items.Add("Open WiFile", null, (s, e) => ShowFromTray());
-            trayMenu.Items.Add("Open shared folder", null, (s, e) => OpenDir(_node.Config.SharedDir));
-            trayMenu.Items.Add(new ToolStripSeparator());
-            trayMenu.Items.Add("Exit", null, (s, e) => ExitApp());
-            _tray = new NotifyIcon { Icon = Icon, Text = "WiFile", ContextMenuStrip = trayMenu, Visible = true };
+            _trayMenu.Items.Add("Open WiFile", null, (s, e) => ShowFromTray());
+            _trayMenu.Items.Add("Open shared folder", null, (s, e) => OpenDir(_node.Config.SharedDir));
+            _trayMenu.Items.Add(new ToolStripSeparator());
+            _trayMenu.Items.Add("Exit", null, (s, e) => ExitApp());
+            _tray = new NotifyIcon { Icon = Icon, Text = "WiFile", ContextMenuStrip = _trayMenu, Visible = true };
             _tray.DoubleClick += (s, e) => ShowFromTray();
             _tray.BalloonTipClicked += (s, e) => ShowFromTray();
 
             // ---------------- engine events
             _node.Sync.StatusChanged += st => UI(() => ShowStatus(st));
-            ShowStatus(_node.Sync.CurrentStatus);
+            _node.Sync.ItemChanged += (path, isDir, removed) => Native.NotifyShell(path, isDir, removed);
             _node.Discovery.PeersChanged += () => UI(UpdatePeers);
+            _node.Connector.InboundBlocked += () => UI(() =>
+            {
+                if (!_bannerDismissed && !_banner.Visible) { _banner.Visible = true; ApplyTheme(); }
+            });
+            Theme.Changed += () => UI(() => { ApplyTheme(); _explorer.Rebuild(); });
 
             Load += (s, e) =>
             {
-                split.SplitterDistance = Math.Max(300, split.Width - 430);
+                _split.SplitterDistance = Math.Max(Theme.S(360), _split.Width - Theme.S(420));
                 UpdatePeers();
                 UpdateNav();
             };
+            HandleCreated += (s, e) => Theme.ApplyTitleBar(this);
             Shown += (s, e) => _chat.FocusInput();
+            ApplyTheme();
+            ShowStatus(_node.Sync.CurrentStatus);
             FirstRunSetup();
             var _ = Handle; // create the handle now so background events can marshal to the UI thread
         }
 
-        void ShowStatus(SyncStatus st)
+        void ApplyTheme()
         {
-            _sync.Text = (st.Busy ? "⟳  " : "✓  ") + st.Text;
-            _sync.ForeColor = st.Busy ? Theme.Accent : Theme.Online;
+            BackColor = Theme.Window;
+            _left.BackColor = _explorer.BackColor = Theme.Surface;
+            _bar.BackColor = _crumbs.BackColor = Theme.Toolbar;
+            _split.BackColor = Theme.Border;
+            _split.Panel1.BackColor = _split.Panel2.BackColor = Theme.Surface;
+            _status.BackColor = Theme.Window;
+            _folder.LinkColor = _folder.ActiveLinkColor = Theme.Link;
+            _banner.BackColor = _bannerText.BackColor = Theme.WarnBack;
+            _bannerText.ForeColor = Theme.Dark ? Theme.Text : Theme.WarnText;
+            foreach (var m in new[] { _viewMenu, _moreMenu, _trayMenu }) ThemedRenderer.Style(m);
+            if (_lastStatus != null) ShowStatus(_lastStatus);
+            if (_tray != null) UpdatePeers();
+            _chat.ApplyTheme();
+            Theme.ApplyTitleBar(this);
+            Invalidate(true);
         }
 
-        static ToolStripButton Glyph(string glyph, string tip) =>
-            new ToolStripButton(glyph) { Font = Theme.Icons, ToolTipText = tip, AutoSize = false, Width = 34, Height = 30 };
+        void LayoutBar()
+        {
+            int m = Theme.S(6), y = (_bar.Height - _back.Height) / 2, x = m;
+            foreach (var b in new[] { _back, _forward, _up, _refresh })
+            {
+                b.Location = new Point(x, y);
+                x += b.Width + Theme.S(2);
+            }
+            int right = _bar.Width - m;
+            foreach (var b in new[] { _more, _openExplorer, _view, _paste, _newFolder })
+            {
+                right -= b.Width;
+                b.Location = new Point(right, y);
+                right -= Theme.S(2);
+            }
+            _crumbs.SetBounds(x + Theme.S(6), y, Math.Max(0, right - x - Theme.S(12)), _back.Height);
+        }
+
+        void LayoutStatus()
+        {
+            int m = Theme.S(12);
+            _folder.Location = new Point(_status.Width - m - _folder.Width, (_status.Height - _folder.Height) / 2);
+            _peers.Location = new Point(_folder.Left - Theme.S(24) - _peers.Width, (_status.Height - _peers.Height) / 2);
+            _sync.SetBounds(m, 0, Math.Max(0, _peers.Left - 2 * m), _status.Height);
+        }
+
+        void BuildViewMenu()
+        {
+            _viewMenu.Items.Clear();
+            (ViewMode mode, string text)[] modes =
+            {
+                (ViewMode.ExtraLargeIcons, "Extra large icons"), (ViewMode.LargeIcons, "Large icons"),
+                (ViewMode.MediumIcons, "Medium icons"), (ViewMode.SmallIcons, "Small icons"),
+                (ViewMode.List, "List"), (ViewMode.Details, "Details"), (ViewMode.Tiles, "Tiles"), (ViewMode.Content, "Content"),
+            };
+            foreach (var (mode, text) in modes)
+            {
+                var item = new ToolStripMenuItem(text) { Checked = _explorer.ViewMode == mode };
+                item.Click += (s, e) =>
+                {
+                    _explorer.ViewMode = mode;
+                    _node.Settings.ViewMode = mode.ToString();
+                    _node.Settings.Save();
+                };
+                _viewMenu.Items.Add(item);
+            }
+            ThemedRenderer.Style(_viewMenu);
+        }
 
         void UI(Action a)
         {
@@ -144,40 +239,26 @@ namespace WiFile.UI
             try { BeginInvoke(a); } catch (InvalidOperationException) { }
         }
 
+        void ShowStatus(SyncStatus st)
+        {
+            _lastStatus = st;
+            _sync.Text = (st.Busy ? "\u21BB  " : "\u2713  ") + st.Text;
+            _sync.ForeColor = st.Busy ? Theme.Accent : Theme.Online;
+        }
+
         void UpdateNav()
         {
             _up.Enabled = !_explorer.AtRoot;
-            var root = _node.Config.SharedDir.TrimEnd('\\');
-            var cur = _explorer.CurrentPath ?? root;
-            var rel = cur.Length > root.Length ? cur.Substring(root.Length).Trim('\\') : "";
-            _path.Text = "Shared" + (rel.Length == 0 ? "" : "  ›  " + string.Join("  ›  ", rel.Split('\\')));
+            _crumbs.SetPath(_node.Config.SharedDir, _explorer.CurrentPath);
         }
 
         void UpdatePeers()
         {
             int n = _node.Discovery.Peers.Count;
-            _peers.Text = n == 0 ? "No other devices online" : $"{n} device{(n == 1 ? "" : "s")} online";
-            _tray.Text = "WiFile — " + _peers.Text;
-        }
-
-        void NewFolder()
-        {
-            var dir = _explorer.CurrentPath ?? _node.Config.SharedDir;
-            var path = PathUtil.UniquePath(dir, "New folder");
-            try { Directory.CreateDirectory(path); }
-            catch (Exception ex) { MessageBox.Show(this, ex.Message, "WiFile"); return; }
-            // The view picks the folder up asynchronously; start rename once it's there.
-            int tries = 0;
-            var t = new Timer { Interval = 150 };
-            t.Tick += (s, e) =>
-            {
-                if (_explorer.SelectAndRename(path) || ++tries > 20)
-                {
-                    t.Stop();
-                    t.Dispose();
-                }
-            };
-            t.Start();
+            _peers.Text = n == 0 ? "No other devices online" : $"\u25CF  {n} device{(n == 1 ? "" : "s")} online";
+            _peers.ForeColor = n == 0 ? Theme.Muted : Theme.Online;
+            _tray.Text = "WiFile \u2014 " + (n == 0 ? "no other devices online" : $"{n} device{(n == 1 ? "" : "s")} online");
+            LayoutStatus();
         }
 
         static void OpenDir(string dir)
@@ -190,11 +271,33 @@ namespace WiFile.UI
             catch { }
         }
 
+        /// <summary>Replace any "block" rules Windows created for WiFile with an allow rule (UAC prompt).</summary>
+        void FixFirewall()
+        {
+            var exe = Application.ExecutablePath;
+            var cmd = "/c netsh advfirewall firewall delete rule name=\"wifile.exe\" & " +
+                      "netsh advfirewall firewall delete rule name=\"WiFile\" & " +
+                      $"netsh advfirewall firewall add rule name=\"WiFile\" dir=in action=allow program=\"{exe}\" enable=yes profile=any";
+            try
+            {
+                var p = Process.Start(new ProcessStartInfo("cmd.exe", cmd) { Verb = "runas", UseShellExecute = true, WindowStyle = ProcessWindowStyle.Hidden });
+                p?.WaitForExit(15000);
+                if (p != null && p.ExitCode == 0)
+                {
+                    _banner.Visible = false;
+                    _bannerDismissed = true;
+                    _tray.ShowBalloonTip(3000, "WiFile", "Windows Firewall now allows WiFile.", ToolTipIcon.Info);
+                }
+            }
+            catch (System.ComponentModel.Win32Exception) { /* user cancelled the UAC prompt */ }
+            catch (Exception ex) { Log.Error("firewall fix", ex); }
+        }
+
         void OnIncoming(ChatMessage m)
         {
             if (Visible && ContainsFocus && WindowState != FormWindowState.Minimized) return;
             var text = m.IsFile ? "sent you " + m.FileName : m.Text;
-            if (text.Length > 120) text = text.Substring(0, 117) + "…";
+            if (text.Length > 120) text = text.Substring(0, 117) + "\u2026";
             _tray.ShowBalloonTip(4000, m.FromName, text, ToolTipIcon.None);
             if (Visible) FlashWindow();
         }
@@ -203,10 +306,10 @@ namespace WiFile.UI
         {
             MessageBox.Show(this,
                 "WiFile " + Application.ProductVersion + "\n\n" +
-                "Share files and chat with every PC on the same Wi-Fi — no internet, accounts or setup.\n\n" +
+                "Share files and chat with every PC on the same Wi-Fi \u2014 no internet, accounts or setup.\n\n" +
                 "Shared folder (your synced copy):\n" + _node.Config.SharedDir + "\n\n" +
                 "Files received in chat:\n" + _node.Config.ReceiveDir + "\n\n" +
-                "Device name: " + _node.Name,
+                "Device name: " + _node.Name + "\n\nhttps://github.com/shahind/WiFile",
                 "About WiFile", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 
@@ -319,15 +422,12 @@ namespace WiFile.UI
             switch (keyData)
             {
                 case Keys.Alt | Keys.Left: _explorer.GoBack(); return true;
+                case Keys.Alt | Keys.Right: _explorer.GoForward(); return true;
                 case Keys.Alt | Keys.Up: _explorer.GoUp(); return true;
                 case Keys.F5: _explorer.RefreshView(); _node.Sync.RequestScan(); return true;
+                case Keys.Control | Keys.Shift | Keys.N: _explorer.NewFolder(); return true;
             }
             return base.ProcessCmdKey(ref msg, keyData);
-        }
-
-        sealed class FlatRenderer : ToolStripSystemRenderer
-        {
-            protected override void OnRenderToolStripBorder(ToolStripRenderEventArgs e) { }
         }
     }
 }

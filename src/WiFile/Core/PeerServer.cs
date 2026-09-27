@@ -9,13 +9,14 @@ namespace WiFile.Core
     /// <summary>Accepts one request per TCP connection and hands it to the node's dispatcher.</summary>
     public sealed class PeerServer : IDisposable
     {
-        readonly Action<NetworkStream, Dictionary<string, object>> _handler;
+        readonly Func<TcpClient, NetworkStream, Dictionary<string, object>, bool> _handler;
         TcpListener _listener;
         volatile bool _running;
 
         public int Port { get; private set; }
 
-        public PeerServer(Action<NetworkStream, Dictionary<string, object>> handler) { _handler = handler; }
+        /// <summary>The handler returns true if it took ownership of the connection (reverse connections).</summary>
+        public PeerServer(Func<TcpClient, NetworkStream, Dictionary<string, object>, bool> handler) { _handler = handler; }
 
         public void Start(int preferredPort)
         {
@@ -53,17 +54,19 @@ namespace WiFile.Core
 
         void Serve(TcpClient c)
         {
+            bool owned = false;
             try
             {
-                using (c)
-                {
-                    Wire.Tune(c);
-                    var s = c.GetStream();
-                    var h = Wire.Receive(s);
-                    _handler(s, h);
-                }
+                Wire.Tune(c);
+                var s = c.GetStream();
+                var h = Wire.Receive(s);
+                owned = _handler(c, s, h);
             }
             catch (Exception ex) { Log.Error("serve", ex); }
+            finally
+            {
+                if (!owned) c.Close();
+            }
         }
 
         public void Dispose()

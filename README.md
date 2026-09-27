@@ -9,9 +9,11 @@ Install it on each PC and open it. PCs on the same network find each other autom
 **Left: the shared folder.** It's the real Windows Explorer view embedded in the app, so everything works the way it does in Explorer:
 
 - Drag and drop files or folders in and out
-- Copy, cut and paste (Ctrl+C / Ctrl+X / Ctrl+V), rename (F2) and delete
+- Copy, cut and paste (Ctrl+C / Ctrl+X / Ctrl+V), rename (F2) and delete. Pasting an image or text from the clipboard saves it as a new file.
 - Right-click → New folder
-- Thumbnails and view modes
+- Thumbnails, plus a **View** menu (icon sizes, List, Details, Tiles, Content)
+- A clickable path bar (Shared › Photos › 2024)
+- Light or dark theme, following your Windows setting
 - Double-click opens a file with its default app
 
 Whatever you put here appears on every other PC running WiFile. Changes, renames, moves and deletes spread the same way.
@@ -31,6 +33,8 @@ Whatever you put here appears on every other PC running WiFile. Changes, renames
 - **Conflicts.** Every change gets a hybrid-clock version, and the most recent change wins. Deletions are recorded so they spread too.
 - **Safety net.** A file removed or overwritten by *another* PC goes to this PC's Recycle Bin. Files still open for writing wait until they're closed. If the whole shared folder is deleted, WiFile doesn't delete it everywhere: it recreates the folder and downloads everything again.
 - **Moves don't re-download.** A moved or renamed file reuses the local bytes. Each file is checked with a fast content fingerprint.
+- **Firewall-proof.** If one PC's firewall blocks incoming connections, the other PC asks it (over UDP) to connect back, and the transfer runs over that connection. WiFile also shows an **Allow** button that fixes the firewall rule after an admin prompt.
+- **Live view.** Changes from other PCs, or from other apps on this PC, show up in the file view instantly.
 - **Background running.** Closing the window keeps WiFile syncing in the tray. It starts with Windows by default; you can turn that off in the `⋯` menu.
 
 ## Requirements

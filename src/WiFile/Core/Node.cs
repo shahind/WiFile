@@ -14,6 +14,8 @@ namespace WiFile.Core
         public int DiscoveryPort = 45877;
         public int TcpPort = 45878;
         public bool UseBroadcast = true;
+        /// <summary>Testing aid: advertise this TCP port instead of the real one (simulates a firewalled PC).</summary>
+        public int AdvertisedPortOverride;
         public List<IPEndPoint> ExtraBeaconTargets = new List<IPEndPoint>();
 
         public static NodeConfig Default(string profile = null)
@@ -26,6 +28,9 @@ namespace WiFile.Core
                 SharedDir = Path.Combine(home, "WiFile" + suffix),
                 DataDir = Path.Combine(local, "WiFile" + suffix),
                 ReceiveDir = Path.Combine(home, "Downloads", "WiFile" + suffix),
+                // Test profiles form their own separate network so they never mix with real devices.
+                DiscoveryPort = string.IsNullOrEmpty(profile) ? 45877 : 45977,
+                TcpPort = string.IsNullOrEmpty(profile) ? 45878 : 0,
             };
         }
     }
@@ -36,6 +41,7 @@ namespace WiFile.Core
         public string Name { get; set; }
         public bool AutoStartConfigured { get; set; }
         public bool TrayHintShown { get; set; }
+        public string ViewMode { get; set; }
 
         [System.Web.Script.Serialization.ScriptIgnore] public string File { get; private set; }
 
@@ -76,6 +82,7 @@ namespace WiFile.Core
         public PeerServer Server { get; private set; }
         public SyncEngine Sync { get; private set; }
         public ChatService Chat { get; private set; }
+        public Connector Connector { get; private set; }
 
         public string Id => Settings.DeviceId;
         public string Name => Settings.Name;
@@ -91,11 +98,13 @@ namespace WiFile.Core
         public void Start()
         {
             Log.Info($"Starting WiFile node {Name} [{Id}] shared={Config.SharedDir}");
-            Sync = new SyncEngine(Config.SharedDir, Config.DataDir, Id, () => Discovery.Peers, id => Discovery.Find(id));
+            Connector = new Connector(Id, () => Discovery, () => Server.Port, Dispatch);
+            Sync = new SyncEngine(Config.SharedDir, Config.DataDir, Id, () => Discovery.Peers, id => Discovery.Find(id), Connector.Connect);
             Chat = new ChatService(() => Id, () => Settings.Name, () => Discovery.Peers, id => Discovery.Find(id),
-                Config.ReceiveDir, Path.Combine(Config.DataDir, "chat.jsonl"));
-            Server = new PeerServer(Dispatch);
+                Config.ReceiveDir, Path.Combine(Config.DataDir, "chat.jsonl"), Connector.Connect);
+            Server = new PeerServer(Serve);
             Discovery = new Discovery(Config, Id, Beacon);
+            Discovery.ReverseRequested += (id, from, token, port) => Connector.HandleReverseRequest(id, from, token, port);
 
             Discovery.PeerUpdated += p => Sync.Poke();
             Sync.IndexAdvanced += () => Discovery.Announce();
@@ -109,11 +118,18 @@ namespace WiFile.Core
         {
             ["id"] = Id,
             ["name"] = Settings.Name,
-            ["port"] = Server.Port,
+            ["port"] = Config.AdvertisedPortOverride > 0 ? Config.AdvertisedPortOverride : Server.Port,
             ["epoch"] = Sync.Index.Epoch,
             ["seq"] = Sync.Index.Seq,
-            ["v"] = 1,
+            ["v"] = 2,
         };
+
+        bool Serve(TcpClient c, NetworkStream s, Dictionary<string, object> h)
+        {
+            if (h.Str("t") == "reverse") return Connector.AcceptReverse(c, h.Str("token"));
+            Dispatch(s, h);
+            return false;
+        }
 
         void Dispatch(NetworkStream s, Dictionary<string, object> h)
         {

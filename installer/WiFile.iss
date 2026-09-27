@@ -1,6 +1,6 @@
 ; WiFile installer (Inno Setup 6)
 #ifndef AppVersion
-  #define AppVersion "1.0.0"
+  #define AppVersion "1.1.0"
 #endif
 
 [Setup]
@@ -36,8 +36,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Shortcuts:"
 
 [Files]
-Source: "..\build\WiFile.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\build\WiFile.exe.config"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "..\out\stage\WiFile.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\out\stage\WiFile.exe.config"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion isreadme skipifsourcedoesntexist
 
 [Icons]

@@ -18,6 +18,10 @@ namespace WiFile.Core
         public string Epoch;
         public long Seq;
         public DateTime LastSeen;
+        public IPEndPoint UdpEndPoint;
+        public bool SupportsReverse;              // protocol v2+
+        public volatile bool UseReverse;          // direct TCP to this peer is blocked
+        public DateTime ReverseSince;
         public IPEndPoint EndPoint => new IPEndPoint(Address, Port);
         public override string ToString() => $"{Name} ({Address}:{Port})";
     }
@@ -30,6 +34,7 @@ namespace WiFile.Core
     public sealed class Discovery : IDisposable
     {
         const string Magic = "WIFILE1";
+        const string ReverseMagic = "WIFILEREV";
         static readonly TimeSpan PeerTimeout = TimeSpan.FromSeconds(8);
 
         readonly NodeConfig _cfg;
@@ -47,6 +52,8 @@ namespace WiFile.Core
         public event Action PeersChanged;
         /// <summary>A peer is new or advertised a new index version.</summary>
         public event Action<Peer> PeerUpdated;
+        /// <summary>A peer can't connect to us and asks us to dial it: (peerId, from, token, tcpPort).</summary>
+        public event Action<string, IPEndPoint, string, int> ReverseRequested;
 
         public Discovery(NodeConfig cfg, string myId, Func<Dictionary<string, object>> beacon)
         {
@@ -160,9 +167,22 @@ namespace WiFile.Core
             }
         }
 
+        public void SendReverseRequest(IPEndPoint to, string token, int tcpPort)
+        {
+            var msg = new Dictionary<string, object> { ["id"] = _myId, ["token"] = token, ["port"] = tcpPort };
+            var data = Encoding.UTF8.GetBytes(ReverseMagic + Json.Serialize(msg));
+            try { _udp.Send(data, data.Length, to); } catch (Exception ex) { Log.Error("reverse request", ex); }
+        }
+
         void Handle(byte[] data, IPEndPoint from)
         {
             var text = Encoding.UTF8.GetString(data);
+            if (text.StartsWith(ReverseMagic))
+            {
+                var r = Json.Parse(text.Substring(ReverseMagic.Length));
+                ReverseRequested?.Invoke(r.Str("id"), from, r.Str("token"), (int)r.Long("port"));
+                return;
+            }
             if (!text.StartsWith(Magic)) return;
             var d = Json.Parse(text.Substring(Magic.Length));
             var id = d.Str("id");
@@ -183,7 +203,10 @@ namespace WiFile.Core
                 var epoch = d.Str("epoch");
                 var seq = d.Long("seq");
                 if (p.Epoch != epoch || p.Seq != seq) versionChanged = true;
+                if (p.Address != null && !p.Address.Equals(from.Address)) p.UseReverse = false;
                 p.Address = from.Address;
+                p.UdpEndPoint = from;
+                p.SupportsReverse = d.Long("v") >= 2;
                 p.Port = (int)d.Long("port");
                 p.Epoch = epoch;
                 p.Seq = seq;

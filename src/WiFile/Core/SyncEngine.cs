@@ -43,6 +43,7 @@ namespace WiFile.Core
         readonly string _root, _trashDir, _tmpDir, _myId;
         readonly Func<List<Peer>> _peers;
         readonly Func<string, Peer> _findPeer;
+        readonly Func<Peer, TcpClient> _connect;
         readonly Dictionary<string, Pending> _pending = new Dictionary<string, Pending>(StringComparer.OrdinalIgnoreCase);
         readonly Dictionary<string, Cursor> _cursors = new Dictionary<string, Cursor>();
         readonly List<TrashItem> _trash = new List<TrashItem>();
@@ -56,15 +57,19 @@ namespace WiFile.Core
         string _lastStatus;
 
         public FileIndex Index { get; }
-        public SyncStatus CurrentStatus { get; private set; } = new SyncStatus { Busy = true, Text = "Starting…" };
+        public SyncStatus CurrentStatus { get; private set; } = new SyncStatus { Busy = true, Text = "Starting\u2026" };
         public string Root => _root;
 
         /// <summary>Local index sequence advanced; peers should be told.</summary>
         public event Action IndexAdvanced;
         public event Action<SyncStatus> StatusChanged;
+        /// <summary>A file or folder changed on disk (full path, is folder, removed). Lets the UI refresh instantly.</summary>
+        public event Action<string, bool, bool> ItemChanged;
 
-        public SyncEngine(string root, string dataDir, string myId, Func<List<Peer>> peers, Func<string, Peer> findPeer)
+        public SyncEngine(string root, string dataDir, string myId, Func<List<Peer>> peers, Func<string, Peer> findPeer,
+            Func<Peer, TcpClient> connect = null)
         {
+            _connect = connect ?? (p => Wire.Connect(p.EndPoint));
             _root = Path.GetFullPath(root);
             _myId = myId;
             _peers = peers;
@@ -212,6 +217,7 @@ namespace WiFile.Core
                     Path = d.Path, IsDir = d.IsDir, Size = d.IsDir ? 0 : d.Size, MTime = d.IsDir ? 0 : d.MTime,
                     Hash = hash, Stamp = HybridClock.Next(), Origin = _myId,
                 });
+                Notify(d.Path, d.IsDir, false);
             }
 
             foreach (var l in Index.Snapshot())
@@ -224,6 +230,7 @@ namespace WiFile.Core
                 t.Stamp = HybridClock.Next();
                 t.Origin = _myId;
                 Index.Put(t);
+                Notify(t.Path, t.IsDir, true);
             }
         }
 
@@ -279,7 +286,7 @@ namespace WiFile.Core
                 long since = sameEpoch ? c.Seq : 0;
                 try
                 {
-                    using (var client = Wire.Connect(p.EndPoint))
+                    using (var client = _connect(p))
                     {
                         var s = client.GetStream();
                         Wire.Send(s, new Dictionary<string, object> { ["t"] = "index", ["since"] = since, ["epoch"] = sameEpoch ? c.Epoch : "" });
@@ -336,7 +343,11 @@ namespace WiFile.Core
             {
                 if (!_running) return;
                 bool done;
-                try { done = Apply(p); }
+                try
+                {
+                    done = Apply(p);
+                    if (done) Notify(p.Entry.Path, p.Entry.IsDir, p.Entry.Deleted);
+                }
                 catch (Exception ex)
                 {
                     Log.Error("apply " + p.Entry, ex);
@@ -351,7 +362,7 @@ namespace WiFile.Core
                 Flush(false);
             }
             if (_pending.Count == 0) Report(false, "Up to date", 0);
-            else Report(true, $"Waiting for {_pending.Count} item(s)…", _pending.Count);
+            else Report(true, $"Waiting for {_pending.Count} item(s)\u2026", _pending.Count);
         }
 
         bool Apply(Pending p)
@@ -472,7 +483,7 @@ namespace WiFile.Core
                 if (peer == null) continue;
                 try
                 {
-                    using (var c = Wire.Connect(peer.EndPoint))
+                    using (var c = _connect(peer))
                     {
                         var s = c.GetStream();
                         Wire.Send(s, new Dictionary<string, object> { ["t"] = "get", ["path"] = e.Path, ["size"] = e.Size, ["hash"] = e.Hash });
@@ -491,7 +502,7 @@ namespace WiFile.Core
                                 if ((DateTime.UtcNow - last).TotalMilliseconds < 250) return;
                                 last = DateTime.UtcNow;
                                 int pct = len == 0 ? 100 : (int)(done * 100 / len);
-                                Report(true, $"Receiving {name} — {pct}% of {PathUtil.FormatSize(len)} from {peer.Name}", _pending.Count);
+                                Report(true, $"Receiving {name} \u2014 {pct}% of {PathUtil.FormatSize(len)} from {peer.Name}", _pending.Count);
                             });
                         }
                         Report(true, $"Received {name}", _pending.Count);
@@ -638,6 +649,12 @@ namespace WiFile.Core
         }
 
         // ------------------------------------------------------------------
+
+        void Notify(string rel, bool isDir, bool removed)
+        {
+            try { ItemChanged?.Invoke(PathUtil.ToFull(_root, rel), isDir, removed); }
+            catch (Exception ex) { Log.Error("notify", ex); }
+        }
 
         void Report(bool busy, string text, int pending)
         {

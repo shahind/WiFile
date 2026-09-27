@@ -98,13 +98,28 @@ static class Program
         File.WriteAllText(P(c2, "from-c.txt"), "back online");
         Check("restarted node shares again", () => Same(nodes, "from-c.txt"));
 
+        // 11. a firewalled PC (nobody can connect to it) still syncs and chats via reverse connections
+        var blockedCfgPorts = new[] { udp[0], udp[1], udp[2], 47004 };
+        var d = MakeNode(3, blockedCfgPorts, blockedInbound: true);
+        foreach (var n in nodes) n.Config.ExtraBeaconTargets.Add(new IPEndPoint(IPAddress.Loopback, 47004));
+        d.Start();
+        var all = nodes.Concat(new[] { d }).ToArray();
+        Check("firewalled node receives existing files", () => Same(all, "from-c.txt") && Same(all, "while-offline.txt"), 30);
+        File.WriteAllText(P(d, "from-firewalled.txt"), "made behind a firewall");
+        Check("others pull files from firewalled node", () => Same(all, "from-firewalled.txt"), 30);
+        var gotByD = 0;
+        d.Chat.MessageReceived += m => Interlocked.Increment(ref gotByD);
+        var toD = a.Chat.SendText("can you hear me?", d.Id);
+        Check("chat reaches firewalled node", () => gotByD == 1 && toD.Status == "Delivered", 30);
+        d.Dispose();
+
         foreach (var n in nodes) n.Dispose();
         Console.WriteLine(_failures == 0 ? "\nALL TESTS PASSED" : $"\n{_failures} TEST(S) FAILED");
         try { Directory.Delete(_base, true); } catch { }
         return _failures == 0 ? 0 : 1;
     }
 
-    static WiFileNode MakeNode(int i, int[] udp)
+    static WiFileNode MakeNode(int i, int[] udp, bool blockedInbound = false)
     {
         var dir = Path.Combine(_base, "node" + i);
         var cfg = new NodeConfig
@@ -116,6 +131,7 @@ static class Program
             TcpPort = 0,
             UseBroadcast = false,
             ExtraBeaconTargets = udp.Where((p, j) => j != i).Select(p => new IPEndPoint(IPAddress.Loopback, p)).ToList(),
+            AdvertisedPortOverride = blockedInbound ? 1 : 0, // port 1: connection refused, like a firewall
         };
         var n = new WiFileNode(cfg);
         n.Rename("Node" + (char)('A' + i));

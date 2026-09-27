@@ -50,6 +50,7 @@ namespace WiFile.Core
         readonly Func<string> _myId, _myName;
         readonly Func<List<Peer>> _peers;
         readonly Func<string, Peer> _findPeer;
+        readonly Func<Peer, TcpClient> _connect;
         readonly string _historyFile;
         readonly object _gate = new object();
         readonly HashSet<string> _receiving = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -59,8 +60,9 @@ namespace WiFile.Core
         public event Action<ChatMessage> MessageUpdated;
 
         public ChatService(Func<string> myId, Func<string> myName, Func<List<Peer>> peers, Func<string, Peer> findPeer,
-            string receiveDir, string historyFile)
+            string receiveDir, string historyFile, Func<Peer, TcpClient> connect = null)
         {
+            _connect = connect ?? (p => Wire.Connect(p.EndPoint));
             _myId = myId;
             _myName = myName;
             _peers = peers;
@@ -136,26 +138,36 @@ namespace WiFile.Core
             var targets = m.To == null ? _peers() : new[] { _findPeer(m.To) }.Where(p => p != null).ToList();
             if (targets.Count == 0)
             {
-                m.Status = "Not delivered — no one else is online";
+                m.Status = "Not delivered \u2014 no one else is online";
                 return m;
             }
-            m.Status = m.IsFile ? "Sending…" : "";
+            m.Status = m.IsFile ? "Sending\u2026" : "";
             int ok = 0, left = targets.Count;
             foreach (var peer in targets)
             {
                 ThreadPool.QueueUserWorkItem(_ =>
                 {
-                    try
+                    // A few retries ride out Wi-Fi hiccups and a peer that is just reconnecting.
+                    for (int attempt = 1; attempt <= 4; attempt++)
                     {
-                        SendTo(peer, m, attachment);
-                        Interlocked.Increment(ref ok);
+                        try
+                        {
+                            var target = _findPeer(peer.Id) ?? peer;
+                            SendTo(target, m, attachment);
+                            Interlocked.Increment(ref ok);
+                            break;
+                        }
+                        catch (Exception ex)
+                        {
+                            Log.Error($"chat send to {peer} (attempt {attempt})", ex);
+                            if (attempt < 4) Thread.Sleep(2000 * attempt);
+                        }
                     }
-                    catch (Exception ex) { Log.Error("chat send to " + peer, ex); }
                     if (Interlocked.Decrement(ref left) == 0)
                     {
                         m.Status = ok == targets.Count
                             ? (targets.Count == 1 ? "Delivered" : $"Delivered to {ok}")
-                            : $"Delivered to {ok} of {targets.Count}";
+                            : ok == 0 ? "Not delivered" : $"Delivered to {ok} of {targets.Count}";
                         MessageUpdated?.Invoke(m);
                     }
                 });
@@ -165,7 +177,7 @@ namespace WiFile.Core
 
         void SendTo(Peer peer, ChatMessage m, string attachment)
         {
-            using (var c = Wire.Connect(peer.EndPoint))
+            using (var c = _connect(peer))
             {
                 var s = c.GetStream();
                 if (attachment == null)

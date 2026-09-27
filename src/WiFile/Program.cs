@@ -18,6 +18,8 @@ namespace WiFile
             int pi = Array.IndexOf(args, "--profile");
             if (pi >= 0 && pi + 1 < args.Length) Profile = args[pi + 1];
             bool minimized = args.Contains("--minimized");
+            int ti = Array.IndexOf(args, "--theme");
+            string theme = ti >= 0 && ti + 1 < args.Length ? args[ti + 1] : null;
 
             if (args.Contains("--unregister"))
             {
@@ -37,6 +39,7 @@ namespace WiFile
 
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
+                Theme.Init(theme); // before any window exists, so shell views pick up dark mode
 
                 WiFileNode node;
                 try

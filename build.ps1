@@ -2,7 +2,7 @@
 param([switch]$SkipTests)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
-$version = '1.0.0'
+$version = '1.1.0'
 
 $dotnet = (Get-Command dotnet -ErrorAction SilentlyContinue).Source
 $userSdk = Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet-sdk\dotnet.exe'
@@ -29,9 +29,9 @@ if (-not $SkipTests) {
 }
 
 Write-Host '== Staging' -ForegroundColor Cyan
-$build = "$root\build"
+$build = "$root\out\stage"
 Remove-Item $build -Recurse -Force -ErrorAction SilentlyContinue
-New-Item -ItemType Directory $build | Out-Null
+New-Item -ItemType Directory $build -Force | Out-Null
 Copy-Item "$root\src\WiFile\bin\Release\net48\WiFile.exe" $build
 Copy-Item "$root\src\WiFile\bin\Release\net48\WiFile.exe.config" $build -ErrorAction SilentlyContinue
 
