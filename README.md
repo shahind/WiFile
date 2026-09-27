@@ -4,6 +4,10 @@ Share files and chat with every PC on the same Wi-Fi. There's no internet, no ac
 
 Install it on each PC and open it. PCs on the same network find each other automatically within a couple of seconds.
 
+![WiFile: the shared folder on the left, chat on the right](assets/screenshot.png)
+
+**[Download the latest installer](https://github.com/shahind/WiFile/releases/latest)**
+
 ## What you get
 
 **Left: the shared folder.** It's the real Windows Explorer view embedded in the app, so everything works the way it does in Explorer:
