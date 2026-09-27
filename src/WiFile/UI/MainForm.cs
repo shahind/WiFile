@@ -309,7 +309,8 @@ namespace WiFile.UI
                 "Share files and chat with every PC on the same Wi-Fi \u2014 no internet, accounts or setup.\n\n" +
                 "Shared folder (your synced copy):\n" + _node.Config.SharedDir + "\n\n" +
                 "Files received in chat:\n" + _node.Config.ReceiveDir + "\n\n" +
-                "Device name: " + _node.Name + "\n\nhttps://github.com/shahind/WiFile",
+                "Device name: " + _node.Name + "\n\nhttps://github.com/shahind/WiFile\n\n" +
+                "Free software under the GNU General Public License v3. It comes with ABSOLUTELY NO WARRANTY.",
                 "About WiFile", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
 

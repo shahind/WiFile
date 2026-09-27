@@ -88,3 +88,7 @@ Layout:
 ## Linux
 
 The Windows app is the supported target. The engine in `Core/` is plain .NET with a simple JSON-and-bytes TCP protocol, so a Linux front end, such as a headless sync daemon or a GTK UI, can interoperate with Windows PCs.
+
+## License
+
+WiFile is free software: you can redistribute it and/or modify it under the terms of the [GNU General Public License v3](LICENSE) as published by the Free Software Foundation. It comes with no warranty; see the license for details.

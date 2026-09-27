@@ -11,7 +11,7 @@
     <Product>WiFile</Product>
     <Company>WiFile</Company>
     <Description>WiFile - share files and chat with PCs on the same Wi-Fi</Description>
-    <Copyright>MIT License</Copyright>
+    <Copyright>Copyright (C) 2026 shahin. Licensed under the GNU GPL v3.</Copyright>
     <PlatformTarget>AnyCPU</PlatformTarget>
     <Prefer32Bit>false</Prefer32Bit>
     <DebugType>embedded</DebugType>
