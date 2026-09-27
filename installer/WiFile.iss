@@ -8,7 +8,19 @@ AppId={{8C4E4F2B-7E0B-4C55-9A57-3E0F3D6A1B21}
 AppName=WiFile
 AppVersion={#AppVersion}
 AppVerName=WiFile {#AppVersion}
-AppPublisher=WiFile
+AppPublisher=shahin
+AppPublisherURL=https://github.com/shahind/WiFile
+AppSupportURL=https://github.com/shahind/WiFile/issues
+AppUpdatesURL=https://github.com/shahind/WiFile/releases
+AppCopyright=MIT License
+VersionInfoVersion={#AppVersion}
+VersionInfoCompany=shahin
+VersionInfoDescription=WiFile Setup - share files and chat on the local network
+VersionInfoProductName=WiFile
+#ifdef Sign
+SignTool=wifisign
+SignedUninstaller=yes
+#endif
 DefaultDirName={autopf}\WiFile
 DefaultGroupName=WiFile
 DisableProgramGroupPage=yes

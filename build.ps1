@@ -35,7 +35,21 @@ New-Item -ItemType Directory $build -Force | Out-Null
 Copy-Item "$root\src\WiFile\bin\Release\net48\WiFile.exe" $build
 Copy-Item "$root\src\WiFile\bin\Release\net48\WiFile.exe.config" $build -ErrorAction SilentlyContinue
 
+$sign = [bool]($env:WIFILE_CERT_THUMBPRINT -or $env:WIFILE_CERT_PFX)
+if ($sign) {
+    Write-Host '== Signing WiFile.exe' -ForegroundColor Cyan
+    & "$root\sign.ps1" "$build\WiFile.exe"
+} else {
+    Write-Warning 'No code-signing certificate configured (see sign.ps1): the installer will be unsigned and SmartScreen will warn on download.'
+}
+
 Write-Host '== Packaging installer' -ForegroundColor Cyan
-& $iscc /Q "/DAppVersion=$version" "$root\installer\WiFile.iss"
+$isccArgs = @('/Q', "/DAppVersion=$version")
+if ($sign) {
+    # Inno Setup calls this for the setup exe and the uninstaller; $f is the file to sign.
+    $isccArgs += "/Swifisign=powershell.exe -NoProfile -ExecutionPolicy Bypass -File `$q$root\sign.ps1`$q `$q`$f`$q"
+    $isccArgs += '/DSign'
+}
+& $iscc @isccArgs "$root\installer\WiFile.iss"
 if ($LASTEXITCODE) { throw 'installer build failed' }
 Get-Item "$root\dist\WiFile-Setup-$version.exe" | Select-Object FullName, @{n='SizeKB';e={[int]($_.Length/1KB)}}

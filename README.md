@@ -44,6 +44,12 @@ Whatever you put here appears on every other PC running WiFile. Changes, renames
 - All PCs on the same network or subnet. Guest Wi-Fi with "client isolation" blocks PC-to-PC traffic, which no LAN app can get around.
 - The installer adds one Windows Firewall rule for `WiFile.exe`. That's why it asks for admin once.
 
+### "Windows protected your PC" when installing
+
+The installer isn't code-signed yet, so Microsoft Defender SmartScreen warns about it after a download. It's safe to continue: click **More info**, then **Run anyway**. You can also right-click the downloaded file, choose **Properties**, tick **Unblock** and click OK.
+
+Once WiFile runs on one PC, send the installer to the others through WiFile's chat. Files received over WiFile don't carry the "downloaded from the internet" mark, so they open without the warning.
+
 ## Security note
 
 Anyone on the same network who runs WiFile can read and change the shared folder and chat with you. That's the point of "no passwords", so use it on networks you trust (home, office, lab).
@@ -53,8 +59,18 @@ Anyone on the same network who runs WiFile can read and change the shared folder
 Requires the .NET SDK 8+ and Inno Setup 6.
 
 ```powershell
-./build.ps1          # builds, runs the 3-node end-to-end test, writes dist\WiFile-Setup-1.0.0.exe
+./build.ps1          # builds, runs the end-to-end tests, writes dist\WiFile-Setup-<version>.exe
 ```
+
+**Code signing.** If a certificate is configured, the build signs `WiFile.exe`, the installer and the uninstaller (SHA-256, timestamped), using `sign.ps1`:
+
+```powershell
+$env:WIFILE_CERT_THUMBPRINT = '<thumbprint>'   # certificate in Cert:\CurrentUser\My (e.g. Certum SimplySign or a USB token)
+# or: $env:WIFILE_CERT_PFX = 'C:\path\cert.pfx'; $env:WIFILE_CERT_PASSWORD = '...'
+./build.ps1
+```
+
+Without a certificate, the build still works and just warns that the output is unsigned.
 
 Run a second isolated instance on one PC for testing with `WiFile.exe --profile B`.
 
