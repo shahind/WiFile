@@ -84,6 +84,29 @@ static class Program
                     && received.Where(m => m.FileName == "song.mp3").All(m => File.Exists(m.LocalPath) && new FileInfo(m.LocalPath).Length == 3_000_000);
         });
 
+        // 8b. delete for everyone: removed from every recipient's history
+        var deleted = new List<string>();
+        b.Chat.MessageDeleted += id => { lock (deleted) deleted.Add("B:" + id); };
+        c.Chat.MessageDeleted += id => { lock (deleted) deleted.Add("C:" + id); };
+        var oops = a.Chat.SendText("sent by mistake", null);
+        Check("message to delete delivered", () => { lock (received) return received.Count(m => m.Id == oops.Id) == 2; });
+        // Someone other than the sender cannot delete it.
+        using (var conn = Wire.Connect(new IPEndPoint(IPAddress.Loopback, b.Server.Port)))
+        {
+            var st = conn.GetStream();
+            Wire.Send(st, new Dictionary<string, object> { ["t"] = "chatdel", ["id"] = oops.Id, ["from"] = c.Id });
+            var r = Wire.Receive(st);
+            Check("non-sender cannot delete", () => !r.Bool("removed"), 1);
+        }
+        a.Chat.Delete(oops, true);
+        Check("delete for everyone", () =>
+        {
+            lock (deleted)
+                return deleted.Contains("B:" + oops.Id) && deleted.Contains("C:" + oops.Id)
+                    && b.Chat.LoadHistory().All(m => m.Id != oops.Id) && c.Chat.LoadHistory().All(m => m.Id != oops.Id)
+                    && a.Chat.LoadHistory().All(m => m.Id != oops.Id);
+        });
+
         // 9. offline changes: stop C, change things on A, restart C
         c.Dispose();
         Thread.Sleep(500);

@@ -7,7 +7,7 @@
     <RootNamespace>WiFile</RootNamespace>
     <ApplicationIcon>..\..\assets\WiFile.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
     <Product>WiFile</Product>
     <Company>WiFile</Company>
     <Description>WiFile - share files and chat with PCs on the same Wi-Fi</Description>

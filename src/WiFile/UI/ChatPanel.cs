@@ -23,6 +23,7 @@ namespace WiFile.UI
         readonly CueTextBox _input = new CueTextBox();
         readonly Dictionary<string, MessageRow> _rows = new Dictionary<string, MessageRow>();
         readonly ContextMenuStrip _toMenu = ThemedRenderer.Menu();
+        readonly ContextMenuStrip _msgMenu = ThemedRenderer.Menu();
         string _toId;
 
         public event Action<ChatMessage> Incoming;
@@ -93,6 +94,8 @@ namespace WiFile.UI
 
             _node.Chat.MessageReceived += m => UI(() => { Add(m); Incoming?.Invoke(m); });
             _node.Chat.MessageUpdated += m => UI(() => { if (_rows.TryGetValue(m.Id, out var r)) r.UpdateStatus(); });
+            _node.Chat.MessageDeleted += id => UI(() => RemoveRow(id));
+            _msgMenu.Opening += (s, e) => e.Cancel = !BuildMessageMenu(RowOf(_msgMenu.SourceControl));
             _node.Discovery.PeersChanged += () => UI(RefreshPeers);
 
             ApplyTheme();
@@ -109,6 +112,7 @@ namespace WiFile.UI
             _inputFrame.BackColor = _input.BackColor = Theme.InputBack;
             _input.ForeColor = Theme.Text;
             ThemedRenderer.Style(_toMenu);
+            ThemedRenderer.Style(_msgMenu);
             Theme.ApplyScrollbars(_list);
             RefreshPeers();
             foreach (var r in _rows.Values) r.ApplyTheme();
@@ -296,10 +300,61 @@ namespace WiFile.UI
             }
         }
 
+        static MessageRow RowOf(Control c)
+        {
+            while (c != null && !(c is MessageRow)) c = c.Parent;
+            return c as MessageRow;
+        }
+
+        /// <summary>Right-click menu of a message: copy / open / delete.</summary>
+        bool BuildMessageMenu(MessageRow row)
+        {
+            if (row == null) return false;
+            var m = row.Message;
+            _msgMenu.Items.Clear();
+            if (!string.IsNullOrEmpty(m.Text))
+                _msgMenu.Items.Add("Copy text", null, (s, e) => { try { Clipboard.SetText(m.Text); } catch { } });
+            if (m.IsFile && m.LocalPath != null && File.Exists(m.LocalPath))
+            {
+                _msgMenu.Items.Add("Open", null, (s, e) => Theme.Open(m.LocalPath));
+                _msgMenu.Items.Add("Show in folder", null, (s, e) => Theme.ShowInFolder(m.LocalPath));
+                _msgMenu.Items.Add("Copy file", null, (s, e) =>
+                {
+                    try { Clipboard.SetFileDropList(new System.Collections.Specialized.StringCollection { m.LocalPath }); } catch { }
+                });
+            }
+            if (_msgMenu.Items.Count > 0) _msgMenu.Items.Add(new ToolStripSeparator());
+            _msgMenu.Items.Add("Delete for me", null, (s, e) => _node.Chat.Delete(m, false));
+            if (m.Outgoing)
+                _msgMenu.Items.Add("Delete for everyone", null, (s, e) =>
+                {
+                    var ask = MessageBox.Show(FindForm(), "Delete this message for everyone?\n\nIt is removed from every device that is online now.",
+                        "Delete message", MessageBoxButtons.OKCancel, MessageBoxIcon.Question);
+                    if (ask == DialogResult.OK) _node.Chat.Delete(m, true);
+                });
+            ThemedRenderer.Style(_msgMenu);
+            return true;
+        }
+
+        void RemoveRow(string id)
+        {
+            if (!_rows.TryGetValue(id, out var row)) return;
+            _rows.Remove(id);
+            _list.RemoveRow(row);
+            row.Dispose();
+        }
+
+        static void SetMenu(Control c, ContextMenuStrip menu)
+        {
+            c.ContextMenuStrip = menu;
+            foreach (Control child in c.Controls) SetMenu(child, menu);
+        }
+
         void Add(ChatMessage m, bool scroll = true)
         {
             if (_rows.ContainsKey(m.Id)) return;
             var row = new MessageRow(m);
+            SetMenu(row, _msgMenu);
             _rows[m.Id] = row;
             _list.AddRow(row);
             if (_rows.Count > MaxRows)
@@ -340,6 +395,13 @@ namespace WiFile.UI
             row.HeightChanged += Restack;
             Controls.Add(row);
             ResumeLayout();
+        }
+
+        public void RemoveRow(MessageRow row)
+        {
+            row.HeightChanged -= Restack;
+            Controls.Remove(row);
+            Restack();
         }
 
         public MessageRow RemoveFirst()

@@ -2,7 +2,7 @@
 param([switch]$SkipTests)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
-$version = '1.1.0'
+$version = '1.2.0'
 
 $dotnet = (Get-Command dotnet -ErrorAction SilentlyContinue).Source
 $userSdk = Join-Path $env:LOCALAPPDATA 'Microsoft\dotnet-sdk\dotnet.exe'

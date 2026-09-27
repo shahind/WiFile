@@ -21,6 +21,7 @@ Whatever you put here appears on every other PC running WiFile. Changes, renames
 **Right: the chat.** Send text, links, images, music or any file, including whole folders (zipped automatically):
 
 - Send to everyone or pick one device.
+- Right-click a message to copy it, open its file, or delete it. **Delete for everyone** (your own messages) also removes it from every device that's online.
 - Drag files onto the chat, use the paperclip, or paste a screenshot with Ctrl+V.
 - Images show a preview. Any file opens in its default app.
 - Received files are saved in `Downloads\WiFile`.

@@ -138,6 +138,7 @@ namespace WiFile.Core
                 case "index": Sync.ServeIndex(s, h); break;
                 case "get": Sync.ServeFile(s, h); break;
                 case "chat": Chat.Receive(s, h); break;
+                case "chatdel": Chat.ReceiveDelete(s, h); break;
                 default: Wire.Send(s, Wire.Error("unknown request")); break;
             }
         }

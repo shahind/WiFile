@@ -340,8 +340,8 @@ namespace WiFile.UI
                 if (view is IFolderView2 fv) fv.SetCurrentFolderFlags(0x01000000, FolderFlags());
                 if (view is IShellView sv && sv.GetWindow(out var hwnd) == 0)
                 {
+                    // Only opt in to dark mode; overriding the view's visual style loses the selection highlight.
                     Native.AllowDarkModeForWindow(hwnd, Theme.Dark);
-                    Native.SetWindowTheme(hwnd, Theme.Dark ? "DarkMode_ItemsView" : "ItemsView", null);
                 }
             }
             catch { }

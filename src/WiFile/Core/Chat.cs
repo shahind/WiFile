@@ -103,6 +103,85 @@ namespace WiFile.Core
             }
         }
 
+        /// <summary>A message was removed (by us, or by its sender for everyone).</summary>
+        public event Action<string> MessageDeleted;
+
+        /// <summary>Removes a message from this PC; with <paramref name="everyone"/> (own messages only)
+        /// also asks every recipient that is online to remove it.</summary>
+        public void Delete(ChatMessage m, bool everyone)
+        {
+            RemoveFromHistory(m.Id, null);
+            MessageDeleted?.Invoke(m.Id);
+            if (!everyone || !m.Outgoing) return;
+            var targets = m.To == null ? _peers() : new[] { _findPeer(m.To) }.Where(p => p != null).ToList();
+            var request = new Dictionary<string, object> { ["t"] = "chatdel", ["id"] = m.Id, ["from"] = _myId() };
+            foreach (var peer in targets)
+            {
+                ThreadPool.QueueUserWorkItem(_ =>
+                {
+                    for (int attempt = 1; attempt <= 3; attempt++)
+                    {
+                        try
+                        {
+                            using (var c = _connect(_findPeer(peer.Id) ?? peer))
+                            {
+                                var s = c.GetStream();
+                                Wire.Send(s, request);
+                                Wire.Receive(s);
+                            }
+                            return;
+                        }
+                        catch (Exception ex)
+                        {
+                            Log.Error($"chat delete to {peer} (attempt {attempt})", ex);
+                            Thread.Sleep(2000 * attempt);
+                        }
+                    }
+                });
+            }
+        }
+
+        /// <summary>A sender asks us to delete one of its messages.</summary>
+        public void ReceiveDelete(NetworkStream s, Dictionary<string, object> h)
+        {
+            var id = h.Str("id");
+            // Only the original sender may delete a message for everyone.
+            bool removed = id != null && RemoveFromHistory(id, h.Str("from"));
+            Wire.Send(s, new Dictionary<string, object> { ["ok"] = true, ["removed"] = removed });
+            if (removed) MessageDeleted?.Invoke(id);
+        }
+
+        bool RemoveFromHistory(string id, string requiredFrom)
+        {
+            lock (_gate)
+            {
+                try
+                {
+                    if (!File.Exists(_historyFile)) return false;
+                    var kept = new List<string>();
+                    bool found = false;
+                    foreach (var line in File.ReadAllLines(_historyFile))
+                    {
+                        ChatMessage m = null;
+                        try { m = Json.Deserialize<ChatMessage>(line); } catch { }
+                        if (m != null && m.Id == id && (requiredFrom == null || m.From == requiredFrom))
+                        {
+                            found = true;
+                            continue;
+                        }
+                        kept.Add(line);
+                    }
+                    if (found) File.WriteAllLines(_historyFile, kept);
+                    return found;
+                }
+                catch (Exception ex)
+                {
+                    Log.Error("chat history delete", ex);
+                    return false;
+                }
+            }
+        }
+
         public ChatMessage SendText(string text, string toId) => Send(NewMessage(toId, m => m.Text = text), null);
 
         public ChatMessage SendFile(string path, string toId)
