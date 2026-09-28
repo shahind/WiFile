@@ -58,6 +58,8 @@ Once WiFile runs on one PC, send the installer to the others through WiFile's ch
 
 Anyone on the same network who runs WiFile can read and change the shared folder and chat with you. That's the point of "no passwords", so use it on networks you trust (home, office, lab).
 
+WiFile collects no data and never connects to the internet. See the [Privacy Policy](PRIVACY.md).
+
 ## Building from source
 
 Requires the .NET SDK 8+ and Inno Setup 6.
